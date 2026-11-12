@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__: task DAG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one layered graph (columns = dependency depth across milestones); box fill = milestone, ring = status. */
+:root {
+  --bg: #fafafa; --panel: #ffffff; --fg: #242424; --muted: #616161; --line: #e0e0e0; --link: #bdbdbd;
+  --m0: #ebf3fc; --m1: #ebf3fc; --m2: #ebf3fc; --m3: #ebf3fc; --m4: #ebf3fc; --m5: #ebf3fc;
+  --mb: #8a8a8a; --opus: #e3008c; --ok: #107c10; --run: #eaa300; --blk: #d13438; --user: #8a3ffc; --hl: #242424;
+  --sans: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #1f1f1f; --panel: #292929; --fg: #ffffff; --muted: #adadad; --line: #3d3d3d; --link: #616161;
+  --m0: #082338; --m1: #082338; --m2: #082338; --m3: #082338; --m4: #082338; --m5: #082338;
+  --mb: #8a8a8a; --opus: #f472c8; --ok: #54b054; --run: #f2c661; --blk: #f1707b; --user: #a879ef; --hl: #ffffff; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #1f1f1f; --panel: #292929; --fg: #ffffff; --muted: #adadad; --line: #3d3d3d; --link: #616161;
+  --m0: #082338; --m1: #082338; --m2: #082338; --m3: #082338; --m4: #082338; --m5: #082338;
+  --mb: #8a8a8a; --opus: #f472c8; --ok: #54b054; --run: #f2c661; --blk: #f1707b; --user: #a879ef; --hl: #ffffff; color-scheme: dark }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 14px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+h1 { font-size: 20px; font-weight: 600; margin: 0; }
+.reload { font-size: 15px; line-height: 1; border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 4px; padding: 2px 6px; cursor: pointer; }
+/* Native selects draw a pill on macOS; drop the native look so the corner radius applies, and draw our own chevron. */
+select.reload { font-size: 12px; padding: 2px 18px 2px 6px; border-radius: 2px; -webkit-appearance: none; appearance: none;
+  background: var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23888'/%3E%3C/svg%3E") no-repeat right 6px center; }
+/* The reload icon turns once per refresh, so an auto refresh is visible. */
+@keyframes spin { to { transform: rotate(360deg); } }
+.ri { display: inline-block; }
+.ri.spin { animation: spin .6s linear 2; }
+.reload:hover { color: var(--hl); border-color: var(--hl); }
+.snap { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.controls label { display: flex; gap: 5px; align-items: center; color: var(--muted); font-size: 13px; }
+input[type=search] { font-family: var(--mono); font-size: 13px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 5px 8px; border-radius: 4px; width: 110px; }
+input:focus-visible, button:focus-visible { outline: 2px solid var(--hl); outline-offset: 1px; }
+.ms { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; max-width: 100%; cursor: grab; }
+.ms.dragging { cursor: grabbing; user-select: none; }
+.ms button { flex: 0 0 230px; }
+.ms button { text-align: left; border: 1px solid var(--line); border-left: 8px solid var(--c); background: var(--c); color: var(--fg);
+  border-radius: 4px; padding: 9px 12px; cursor: pointer; font-family: var(--sans); display: grid; gap: 6px; align-content: start; }
+.ms button[aria-pressed="true"] { border-color: var(--hl); border-left-color: var(--c); box-shadow: 0 0 0 1px var(--hl); }
+.ms .t { font-weight: 600; font-size: 13px; }
+.ms .s { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ms .s b { color: var(--fg); font-family: var(--mono); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.dq { border-left: 3px solid var(--user); padding: 4px 0 4px 9px; margin-top: 4px; }
+.dqq { font-weight: 600; font-size: 13px; line-height: 1.35; }
+.dqs { margin: 4px 0 0; font-size: 12.5px; line-height: 1.4; }
+.dqf { margin-top: 6px; font-size: 12px; }
+.dqf summary { cursor: pointer; color: var(--user); font-weight: 600; }
+.dqf ul { margin: 4px 0 0; padding-left: 16px; display: grid; gap: 2px; line-height: 1.35; }
+.dqo { margin: 4px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--fg); display: grid; gap: 2px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.pill { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 10px; color: var(--fg); border: 1px solid var(--line); }
+.pill.plain { background: var(--bg); font-weight: 500; }
+.pill.st-open { background: var(--bg); }
+.pill.st-running { background: var(--run); color: #fff; border-color: var(--run); }
+.pill.st-blocked { background: var(--blk); color: #fff; border-color: var(--blk); }
+.pill.st-done { background: var(--ok); color: #fff; border-color: var(--ok); }
+.chip { font-size: 11.5px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+.chip.run { border-color: var(--run); color: var(--run); font-weight: 600; }
+.chip.blk { border-color: var(--blk); color: var(--blk); font-weight: 600; }
+.chip.you { border-color: var(--user); color: var(--user); font-weight: 600; }
+.chip.opus { border-color: var(--opus); color: var(--opus); font-weight: 600; }
+.job { display: grid; gap: 3px; text-align: left; width: 100%; border: 1px solid var(--line); border-left: 4px solid var(--pc);
+  background: var(--bg); color: var(--fg); border-radius: 4px; padding: 7px 9px; cursor: pointer; font: inherit; font-family: var(--sans); }
+.job .jt { font-size: 13px; line-height: 1.3; } .job .jt b { font-family: var(--mono); margin-right: 4px; }
+.job .jm { font-size: 11.5px; color: var(--muted); }
+.job .jx { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12px; color: var(--muted); }
+.job .jx b { font-family: var(--mono); }
+.ms .run { color: var(--run); font-weight: 600; } .ms .blk { color: var(--blk); font-weight: 600; }
+.prog { display: flex; align-items: center; gap: 8px; }
+.bar { flex: 1; display: flex; height: 8px; border-radius: 4px; background: var(--panel); border: 1px solid var(--mb); overflow: hidden; }
+.bar i { display: block; height: 100%; }
+.bar i.d { background: var(--ok); } .bar i.r { background: var(--run); } .bar i.b { background: var(--blk); }
+.pct { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right; }
+.eta { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.lim { margin-left: auto; align-self: center; display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px 2px 8px; background: var(--panel); }
+.lim .lh { text-transform: uppercase; letter-spacing: .04em; font-size: 11px; margin-right: 4px; }
+.lim .li { cursor: help; padding: 1px 6px; border-radius: 3px; }
+.lim .li:hover, .lim .li:focus { background: var(--line); color: var(--fg); outline: none; }
+.lim .li u { text-decoration: underline dotted; text-underline-offset: 3px; }
+.right { flex: 1 1 0; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 6px; }
+.right .lim { flex-wrap: nowrap; white-space: nowrap; }
+.right .lim { margin-left: 0; }
+.lim i.warn { color: var(--blk); }
+.lim i { font-style: normal; color: var(--fg); font-family: var(--mono); font-variant-numeric: tabular-nums; margin-left: 4px; }
+.eta b { color: var(--fg); font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ms .e { font-size: 12.5px; font-weight: 600; }
+/* Compact cards (experiment): one-line titles, no done line, smaller chips, so more milestones fit in the row. */
+.ms.compact { gap: 6px; }
+.ms.compact button { flex-basis: 200px; padding: 6px 10px; gap: 4px; border-left-width: 6px; }
+.ms.compact .t { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms.compact .s { display: none; }
+.ms.compact .bar { height: 7px; }
+.ms.compact .pct { font-size: 11px; min-width: 2.8em; }
+.ms.compact .chips { gap: 3px; }
+.ms.compact .chip { font-size: 11px; padding: 0 6px; }
+.ms.compact .e { font-size: 12px; }
+.tb { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin-top: 4px; font-size: 13px; align-items: baseline; }
+.tb .l { color: var(--muted); font-size: 12px; }
+.tb .v { font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pace { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; color: var(--panel); background: var(--pc); margin-top: 6px; }
+.meter { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 2px; }
+.meter i { display: block; height: 100%; background: var(--pc); }
+.flt { font: inherit; font-size: 12px; display: inline-flex; align-items: center; gap: 2px; border: 1px solid transparent; background: none; color: var(--muted); border-radius: 4px; padding: 2px 7px; cursor: pointer; }
+.flt:hover { border-color: var(--line); }
+.flt[aria-pressed="true"] { border-color: var(--hl); color: var(--fg); background: var(--panel); font-weight: 600; }
+.clear:disabled { border-color: var(--line); color: var(--muted); cursor: default; opacity: .6; }
+.clear { font: inherit; font-size: 12px; border: 1px solid var(--hl); color: var(--hl); background: var(--panel); border-radius: 4px; padding: 2px 9px; cursor: pointer; margin-left: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); align-items: center; }
+.sw { display: inline-block; width: 14px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; background: var(--m0); border: 1px solid var(--mb); }
+.main { flex: 1; min-height: 380px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 32%); gap: 12px; }
+@media (max-width: 760px) { .main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(380px, 1fr) auto; } }
+.canvas { overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); min-width: 0; }
+svg text { font-family: var(--mono); font-size: 10px; fill: var(--fg); pointer-events: none; }
+svg .lane-label { font-family: var(--sans); font-size: 13px; font-weight: 600; }
+svg .lane-sub { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+.n rect.box { stroke: var(--mb); stroke-width: 1; cursor: pointer; }
+.n.done { opacity: .38; }
+.n rect.ring { fill: none; pointer-events: none; }
+/* One ring per flag, all in the box outline: with several flags each ring is a dash offset from the others,
+   so the colors interleave around the same outline instead of one hiding another or growing past the spacing. */
+.n rect.ring { stroke: none; stroke-width: 3; }
+/* Flags are classes on the task box; each ring slot is colored by its class, so flags compose in CSS.
+   With several flags (.multi) each slot draws a 5px dash at its own offset in a 25px period. */
+.n.running rect.r-st { stroke: var(--run); }
+.n.blocked rect.r-st { stroke: var(--blk); }
+.n.you rect.r-user { stroke: var(--user); }
+.n.opus rect.r-opus { stroke: var(--opus); }
+.n.multi rect.ring { stroke-dasharray: 5 20; }
+.n.multi rect.r-user { stroke-dashoffset: -5; }
+.n.multi rect.r-opus { stroke-dashoffset: -15; }
+.n.you text { font-weight: 600; }
+.n.running text, .n.blocked text { font-weight: 600; }
+.e { fill: none; stroke: var(--link); stroke-width: 1; opacity: .5; }
+.e.x { stroke-dasharray: 4 3; }
+.dim { opacity: .1; }
+.e.on { stroke: var(--hl); opacity: 1; stroke-width: 1.6; }
+/* Fluent selection: neutral 2px stroke and the shadow4 elevation, so the selected box lifts off its chain. */
+.n.sel rect.box { stroke: var(--fg); stroke-width: 2; filter: drop-shadow(0 2px 2px rgba(0,0,0,.14)) drop-shadow(0 0 2px rgba(0,0,0,.12)); }
+.n.sel text { font-weight: 700; }
+.n.chain { opacity: .55; }
+.n.sel { transform-box: fill-box; transform-origin: center; transform: scale(1.15); }
+.tag rect { fill: var(--fg); } .tag text { fill: var(--panel); font-family: var(--sans); font-size: 11px; font-weight: 600; }
+aside { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 12px 14px; overflow: auto; min-width: 0; font-size: 13px; }
+aside h2 { font-size: 15px; margin: 0 0 6px; text-wrap: balance; }
+aside .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-top: 10px; }
+aside .ids { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+aside .ids button { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 3px; padding: 1px 5px; cursor: pointer; }
+aside .list { font-size: 12px; display: grid; gap: 6px; margin-top: 6px; }
+/* Task text as written: wrapped, in the page font, so a section reads like the checklist did. */
+aside pre.sx { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--sans); font-size: 12.5px; line-height: 1.4; margin: 3px 0 0; }
+aside .list a { font-family: var(--mono); color: var(--fg); overflow-wrap: anywhere; }
+aside .steps { font-family: var(--mono); font-size: 11.5px; color: var(--muted); display: grid; gap: 2px; margin-top: 4px; }
+aside .log li { margin-top: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>__TITLE__: task DAG</h1>
+  <span class="snap" id="snap"></span>
+  <button type="button" id="reload" class="reload" title="Reload data" aria-label="Reload data"><span class="ri">&#x21bb;</span></button>
+  <select id="every" class="reload" title="Auto refresh" aria-label="Auto refresh"><option value="0">Off</option><option value="5">5s</option><option value="10">10s</option><option value="15">15s</option><option value="30">30s</option></select>
+  <span class="right">
+  <span class="lim" id="lim"></span>
+  </span>
+</header>
+<div class="ms" id="ms" role="group" aria-label="Milestones"></div>
+<div class="controls">
+  <label>Task <input type="text" id="goto" list="taskids" inputmode="numeric" autocomplete="off" placeholder="id" style="width:64px" aria-label="Go to task id"></label>
+  <datalist id="taskids"></datalist>
+  <label><input type="checkbox" id="hideDone" checked> Hide closed</label>
+  <label><input type="checkbox" id="hideDoneMs" checked> Hide done milestones</label>
+  <label><input type="checkbox" id="compactMs" checked> Compact</label>
+  <label>Zoom <input type="range" id="zoom" min="40" max="160" value="100" aria-label="Zoom"></label>
+  <span class="eta" id="eta"></span>
+</div>
+<div class="legend">
+  <button type="button" class="flt" data-flt="running" aria-pressed="false"><i class="sw" style="border:2.5px solid var(--run)"></i>running</button>
+  <button type="button" class="flt" data-flt="blocked" aria-pressed="false"><i class="sw" style="border:2.5px solid var(--blk)"></i>blocked</button>
+  <button type="button" class="flt" data-flt="user" aria-pressed="false"><i class="sw" style="border:2.5px solid var(--user)"></i>user</button>
+  <button type="button" class="flt" data-flt="opus" aria-pressed="false" title="Tasks the orchestrator runs: [orch] by hand, [opus] through an Opus sub-agent"><i class="sw" style="border:2.5px solid var(--opus)"></i>orchestrator</button>
+  <button id="clearSel" type="button" class="clear" disabled>Clear</button>
+</div>
+<div class="main">
+  <div class="canvas" id="canvas"></div>
+  <aside id="detail"></aside>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+// Data comes embedded (static page from `tm.py view`) or from /data.json (live page from `tm.py serve`).
+const CLOSED = new Set(['done', 'superseded', 'skipped', 'obsolete']);
+let D, T, deps, kids, MS, MI, timed, RATIO, MEDACT, LIVE = false;
+function load(d) {
+  D = d; T = new Map(D.tasks.map(t => [t.id, t])); deps = new Map(); kids = new Map();
+  idList();
+  for (const t of D.tasks) { deps.set(t.id, []); kids.set(t.id, []); }
+  for (const [a, b] of D.links) { deps.get(a).push(b); kids.get(b).push(a); }
+  MS = D.milestones; MI = new Map(MS.map((m, i) => [m.id, i]));
+  hues();
+  // Calibration from closed tasks with timings: actual time over the written estimate.
+  timed = D.tasks.filter(t => CLOSED.has(t.status) && t.status !== 'superseded' && t.secs);
+  RATIO = med(timed.filter(t => t.est).map(t => t.secs / 60 / t.est)) || 1;
+  MEDACT = med(timed.map(t => t.secs)) || 15 * 60;
+  document.getElementById('snap').textContent = (LIVE ? 'updated ' : 'snapshot ') + new Date(D.at * 1000).toLocaleTimeString();
+}
+// Milestone colour from its number by golden-angle hue spacing: no two milestones share a hue, and a
+// milestone keeps its colour across reloads. Light and dark themes get their own lightness.
+const isDark = () => document.documentElement.dataset.theme === 'dark' ||
+  (document.documentElement.dataset.theme !== 'light' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+// Active milestones (with open work) are spread evenly round the wheel; done ones fall back to golden-angle hues.
+let HUE = new Map();
+function hues() {
+  const act = MS.filter(m => D.tasks.some(t => t.milestone === m.id && !CLOSED.has(t.status)));
+  HUE = new Map(act.map((m, i) => [m.id, Math.round(15 + i * 360 / act.length)]));
+}
+// 20 Fluent 2 shared-colour tints (light) and shades (dark), ordered so neighbours differ; past ~20, tints blur together.
+const TINT = ['#c7e0f4', '#fed9cc', '#c9eac7', '#e6dcf5', '#fef0b7', '#c2ecf1', '#f9d7dc', '#d8ecc4', '#dcdffb', '#fcdcf8',
+  '#f5e2c7', '#cfe5e3', '#f3d6d8', '#d4e0f5', '#efe4b0', '#e2d7eb', '#c6e8da', '#f8dfca', '#dde3e8', '#ecdcd1'];
+const SHADE = ['#0e3d66', '#6b2a16', '#1f5c1f', '#4a3570', '#6b5a0e', '#0f4f57', '#6b2330', '#3b5a1f', '#2e3a7a', '#6b1f63',
+  '#6b4a1a', '#245553', '#5c1f26', '#1f3f6b', '#5a5014', '#4f2e5c', '#1b5440', '#6b3d1f', '#3a4550', '#5a3d30'];
+// Fixed by milestone number, so a colour never moves when another milestone opens or closes. Number mod 20 keeps
+// neighbours apart and repeats only every 20; a hash of the id would collide among ~20 active ones.
+const col = id => { const n = parseInt(String(id).replace(/\D/g, ''), 10) || 0;
+  return (isDark() ? SHADE : TINT)[n % TINT.length]; };
+let view = 'ALL', sel = null;
+
+const live = t => t.status !== 'superseded';
+const med = a => { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y), k = b.length >> 1; return b.length % 2 ? b[k] : (b[k - 1] + b[k]) / 2; };
+const fmtDur = s => { s = Math.max(0, Math.round(s / 60)); const h = Math.floor(s / 60); return h ? `${h}h ${s % 60}m` : `${s}m`; };
+// Rough duration from now: minutes under an hour, half hours under a day, then days and hours.
+const NOW = () => Date.now() / 1000;
+const approx = s => { s = Math.max(0, s) / 60;
+  if (s < 50) return `~${Math.max(5, Math.round(s / 5) * 5)} min`;
+  if (s < 24 * 60) { const h = Math.round(s / 30) / 2; return `~${h} h`; }
+  const d = Math.floor(s / 1440), h = Math.round((s - d * 1440) / 60); return `~${d} d${h ? ' ' + h + ' h' : ''}`; };
+const fromNow = t => approx(t - NOW());
+const fmtAt = t => new Date(t * 1000).toLocaleString([], {weekday: 'short', hour: '2-digit', minute: '2-digit'});
+const needsYou = t => t.kind === 'user';
+function dur(t) {
+  // Expected pi seconds for the whole task; running tasks get the rest of it, at least 2 min.
+  const full = t.est ? Math.max(180, t.est * 60 * RATIO) : MEDACT;
+  return t.status === 'running' ? Math.max(120, full - (t.secs || 0)) : full;
+}
+const expect = t => t.est ? Math.max(180, t.est * 60 * RATIO) : MEDACT;
+// Pace: on track while within the expected time, over past it, well over past 1.5x.
+const pace = (used, exp) => used <= exp ? ['on track', 'var(--ok)'] : used <= 1.5 * exp ? ['running over', 'var(--run)'] : ['well over', 'var(--blk)'];
+let SIM = {};
+function simulate(W) {
+  // List scheduling over the DAG in the scheduler's claim order (milestone, then list position).
+  const open = D.tasks.filter(t => live(t) && !CLOSED.has(t.status));
+  const left = new Map(open.map(t => [t.id, deps.get(t.id).filter(d => !CLOSED.has(T.get(d).status) && T.has(d) && live(T.get(d))).length]));
+  const fin = new Map(), start = new Map(); let now = D.at;
+  const busy = []; // [endTime, id]
+  for (const t of open.filter(t => t.status === 'running')) { start.set(t.id, now - (t.secs || 0)); busy.push([now + dur(t), t.id]); }
+  const order = (a, b) => MI.get(a.milestone) - MI.get(b.milestone) || a.ord - b.ord;
+  const ready = () => open.filter(t => t.status !== 'running' && !start.has(t.id) && left.get(t.id) === 0).sort(order);
+  const done = id => { for (const k of kids.get(id)) if (left.has(k)) left.set(k, left.get(k) - 1); };
+  let guard = 0;
+  while (guard++ < 100000) {
+    // Tasks that need the user finish instantly here and are listed separately.
+    let r = ready();
+    for (const t of r.filter(needsYou)) { start.set(t.id, now); fin.set(t.id, now); done(t.id); }
+    r = ready();
+    while (busy.length < W && r.length) { const t = r.shift(); start.set(t.id, now); busy.push([now + dur(t), t.id]); }
+    if (!busy.length) break;
+    busy.sort((a, b) => a[0] - b[0]); const [end, id] = busy.shift(); now = end; fin.set(id, end); done(id);
+  }
+  const ms = {};
+  for (const t of open) { const f = fin.get(t.id); if (f == null) continue; const m = ms[t.milestone] ||= {eta: 0, work: 0, you: 0};
+    m.eta = Math.max(m.eta, f); if (needsYou(t)) m.you++; else m.work += dur(t); }
+  return {fin, start, ms, eta: Math.max(D.at, ...fin.values()), work: open.filter(t => !needsYou(t)).reduce((a, t) => a + dur(t), 0),
+    stuck: open.filter(t => !fin.has(t.id)).length};
+}
+function counts(ms) {
+  const ts = D.tasks.filter(t => live(t) && (ms === 'ALL' || t.milestone === ms));
+  const n = s => ts.filter(t => t.status === s).length;
+  return {all: ts.length, ok: n('done'), done: n('done') + n('skipped') + n('obsolete'), open: n('open'), run: n('running'), blk: n('blocked'), you: ts.filter(t => !CLOSED.has(t.status) && t.kind === 'user').length,
+    opus: ts.filter(t => flags(t).includes('opus')).length};
+}
+function etaLine(id) {
+  const m = id === 'ALL' ? {eta: SIM.eta, work: SIM.work} : SIM.ms[id];
+  if (!m || !m.eta) return `<span class="e" style="color:var(--muted)">complete</span>`;
+  return `<span class="e">done in ${fromNow(m.eta)}${m.you ? ` · ${m.you} wait on you` : ''}</span>`;
+}
+function msCards() {
+  msCardsInner();
+  const box = document.getElementById('ms');
+  if (box.dataset.keep) box.scrollLeft = +box.dataset.keep;
+}
+function msCardsInner() {
+  const box = document.getElementById('ms'); const keep = box.scrollLeft; box.innerHTML = '';
+  const showDone = !document.getElementById('hideDoneMs').checked;
+  box.classList.toggle('compact', document.getElementById('compactMs').checked);
+  // Cards sort by milestone number (M23 before M28); MS keeps the run order the graph and ETA use.
+  const byNum = MS.slice().sort((a, b) => (parseInt(a.id.slice(1), 10) || 0) - (parseInt(b.id.slice(1), 10) || 0));
+  for (const m of [{id: 'ALL', title: 'All milestones'}, ...byNum]) {
+    // Done tasks only, rounded down: 305 of 307 rounded to 100 % while one still ran.
+    const c = counts(m.id), pct = c.all ? Math.floor(100 * c.ok / c.all) : 0;
+    // A milestone with every task closed is hidden unless asked for, or unless it is the one in view.
+    // Nothing open, running or blocked means done, including a milestone whose tasks were all superseded (0 of 0).
+    if (m.id !== 'ALL' && c.open + c.run + c.blk === 0 && !showDone && view !== m.id) continue;
+    const b = document.createElement('button'); b.id = 'ms-' + m.id;
+    b.style.setProperty('--c', m.id === 'ALL' ? 'var(--panel)' : col(m.id));
+    if (m.id === 'ALL') b.style.borderLeftColor = 'var(--mb)';
+    b.setAttribute('aria-pressed', view === m.id);
+    b.title = m.id === 'ALL' ? 'All milestones' : m.id + '. ' + m.title;
+    b.innerHTML = `<span class="t">${m.id === 'ALL' ? 'All milestones' : m.id + '. ' + esc(m.title)}</span>
+      <span class="prog"><span class="bar"><i class="d" style="width:${pct}%"></i><i class="r" style="width:${c.all ? 100 * c.run / c.all : 0}%"></i><i class="b" style="width:${c.all ? 100 * c.blk / c.all : 0}%"></i></span><b class="pct">${pct}%</b></span>
+      <span class="s"><b>${c.done}</b> of <b>${c.all}</b> done</span>
+      <span class="chips"><span class="chip">${c.open} open</span>${c.run ? `<span class="chip run">${c.run} running</span>` : ''}${c.blk ? `<span class="chip blk">${c.blk} blocked</span>` : ''}${c.you ? `<span class="chip you">${c.you} user</span>` : ''}${c.opus ? `<span class="chip opus">${c.opus} orchestrator</span>` : ''}</span>
+      ${etaLine(m.id)}`;
+    b.onclick = () => { view = m.id; sel = null; draw(); };
+    box.appendChild(b);
+  }
+}
+let flt = null;  // legend filter: running, blocked, user or orchestrator
+document.querySelectorAll('.flt').forEach(b => b.onclick = () => { flt = flt === b.dataset.flt ? null : b.dataset.flt; sel = null; draw(); });
+(() => {
+  // The row is rebuilt on every redraw, so its scroll position is stored and restored.
+  const box = document.getElementById('ms');
+  box.addEventListener('scroll', () => { box.dataset.keep = box.scrollLeft; });
+  let down = null, moved = false;
+  box.addEventListener('pointerdown', e => { down = {x: e.clientX, left: box.scrollLeft}; moved = false; });
+  window.addEventListener('pointermove', e => {
+    if (!down) return;
+    const dx = e.clientX - down.x;
+    if (Math.abs(dx) > 5) { moved = true; box.classList.add('dragging'); box.scrollLeft = down.left - dx; }
+  });
+  window.addEventListener('pointerup', () => { down = null; setTimeout(() => box.classList.remove('dragging'), 0); });
+  // A drag must not count as a click on a card.
+  box.addEventListener('click', e => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
+  box.addEventListener('wheel', e => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { box.scrollLeft += e.deltaY; e.preventDefault(); } }, {passive: false});
+})();
+document.getElementById('clearSel').onclick = () => { sel = null; flt = null; document.getElementById('goto').value = ''; draw(); };
+['hideDone', 'zoom', 'hideDoneMs', 'compactMs'].forEach(i => document.getElementById(i).addEventListener('input', draw));
+
+// Task id field: the datalist offers ids only (no label), so suggestions match on the id, not the title.
+// The list is rebuilt only when the ids change, so the 5 s refresh does not close an open dropdown.
+let IDKEY = '';
+function idList() {
+  const key = D.tasks.map(t => t.id + t.status).join();
+  if (key === IDKEY) return; IDKEY = key;
+  document.getElementById('taskids').innerHTML = D.tasks.slice().sort((a, b) => a.id - b.id)
+    .map(t => `<option value="${t.id}"></option>`).join('');
+}
+(() => {
+  const g = document.getElementById('goto');
+  const jump = () => { const n = parseInt(g.value, 10); if (T.has(n)) go(n); };
+  g.addEventListener('change', jump);
+  g.addEventListener('keydown', e => { if (e.key === 'Enter') jump(); });
+})();
+function go(n) {
+  if (!T.has(n)) return; const u = T.get(n);
+  if (view !== 'ALL' && u.milestone !== view) view = u.milestone;
+  if (CLOSED.has(u.status)) document.getElementById('hideDone').checked = false;
+  sel = n; draw(); const el = document.getElementById('n' + n); el && el.scrollIntoView({block: 'center', inline: 'center'});
+}
+
+// The caps `tm.py claim` enforces on every claim, read live from tasks.db meta.
+function limitsLine() {
+  const L = D.limits; if (!L) return '';
+  const it = [
+    ['agents', `${D.tasks.filter(t => t.status === 'running').length} / ${L.max_running}`, 'Tasks running now / the cap on running tasks, set with tm.py cap <n> (meta max_running). The cap gates new claims only; running tasks above it finish first.'],
+    ['Opus', L.max_opus, 'Opus tasks at once; the orchestrator dispatches them and reads this cap (meta max_opus).']];
+  return '<span class="lh">Limits</span>' + it.map(([k, v, h]) => `<span class="li" tabindex="0" title="${esc(h)}" aria-label="${esc(k + ' ' + v + ': ' + h)}"><u>${k}</u><i>${v}</i></span>`).join('');
+}
+function draw() {
+  document.getElementById('clearSel').disabled = !sel && !flt && !document.getElementById('goto').value;
+  document.querySelectorAll('.flt').forEach(b => b.setAttribute('aria-pressed', flt === b.dataset.flt));
+  const NWK = Math.max(1, D.cap || 6);
+  SIM = simulate(NWK);
+  const you = D.tasks.filter(t => live(t) && !CLOSED.has(t.status) && needsYou(t)).length;
+  document.getElementById('eta').innerHTML =
+    (SIM.stuck ? `<span style="color:var(--blk)">${SIM.stuck} tasks cannot be scheduled</span>` : '');
+  document.getElementById('lim').innerHTML = limitsLine();
+  msCards();
+  const hide = document.getElementById('hideDone').checked;
+  // A filter is a flag class: the legend button's key names the class it keeps.
+  const pass = t => !flt || flags(t).includes(FLT[flt]);
+  const vs = D.tasks.filter(t => live(t) && (view === 'ALL' || t.milestone === view) && !(hide && CLOSED.has(t.status)) && MI.has(t.milestone) && pass(t));
+  const ids = new Set(vs.map(t => t.id));
+  // One layered layout: column = longest dependency path over all visible tasks, across milestones.
+  const L = new Map();
+  const depth = i => { if (L.has(i)) return L.get(i); L.set(i, 0);
+    const v = Math.max(-1, ...deps.get(i).filter(d => ids.has(d)).map(depth)) + 1; L.set(i, v); return v; };
+  vs.forEach(t => depth(t.id));
+  const nl = Math.max(0, ...L.values()) + 1;
+  const cols = Array.from({length: nl}, () => []);
+  vs.slice().sort((a, b) => MI.get(a.milestone) - MI.get(b.milestone) || a.ord - b.ord).forEach(t => cols[L.get(t.id)].push(t.id));
+  // Barycenter sweeps to cut crossings.
+  const pos = new Map();
+  const setPos = () => cols.forEach(c => c.forEach((id, k) => pos.set(id, k))); setPos();
+  for (let s = 0; s < 3; s++) for (let l = 1; l < nl; l++) {
+    const bc = id => { const ds = deps.get(id).filter(d => ids.has(d)); return ds.length ? ds.reduce((a, d) => a + pos.get(d), 0) / ds.length : pos.get(id); };
+    cols[l].sort((a, b) => bc(a) - bc(b)); setPos();
+  }
+  const z = document.getElementById('zoom').value / 100;
+  const NW = 46, NH = 18, GX = 76, GY = 24, PAD = 24;
+  const W = PAD * 2 + nl * GX, H = PAD * 2 + 14 + Math.max(1, ...cols.map(c => c.length)) * GY;
+  const X = id => PAD + L.get(id) * GX, Y = id => PAD + 14 + pos.get(id) * GY;
+  const on = new Set();
+  if (sel && ids.has(sel)) {
+    const seen = new Set();
+    const walk = (i, m) => { if (seen.has(i + m)) return; seen.add(i + m); on.add(i); for (const n of (m === 'u' ? deps : kids).get(i)) if (ids.has(n)) walk(n, m); };
+    walk(sel, 'u'); walk(sel, 'd');
+  }
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W * z}" height="${H * z}" viewBox="0 0 ${W} ${H}">`;
+  for (let l = 0; l < nl; l += 5) s += `<text class="lane-sub" x="${PAD + l * GX}" y="${PAD - 6}">depth ${l + 1}</text>`;
+  for (const t of vs) for (const d of deps.get(t.id)) if (ids.has(d)) {
+    const x1 = X(d) + NW, y1 = Y(d) + NH / 2, x2 = X(t.id), y2 = Y(t.id) + NH / 2, cross = T.get(d).milestone !== t.milestone;
+    const mx = cross ? Math.max(x1, x2) + 30 : (x1 + x2) / 2;
+    const hot = sel && on.has(t.id) && on.has(d);
+    s += `<path class="e${cross ? ' x' : ''}${hot ? ' on' : (sel ? ' dim' : '')}" d="M${x1},${y1} C${mx},${y1} ${cross ? x2 - 30 : mx},${y2} ${x2},${y2}"/>`;
+  }
+  for (const t of vs) {
+    const st = CLOSED.has(t.status) ? 'done' : t.status;
+    const fl = flags(t);
+    const cls = ['n', st, ...fl, fl.length > 1 ? 'multi' : '', t.kind === 'user' ? 'user' : '', t.id === sel ? 'sel' : '', sel && !on.has(t.id) ? 'dim' : '', sel && on.has(t.id) && t.id !== sel ? 'chain' : ''].join(' ');
+    const x = X(t.id), yy = Y(t.id);
+    s += `<g class="${cls}" id="n${t.id}" data-id="${t.id}"><title>${t.id} ${esc(t.title)} [${t.status}]${SIM.fin.get(t.id) ? ' · done in ' + fromNow(SIM.fin.get(t.id)) : ''}</title>` +
+      `<rect class="box" x="${x}" y="${yy}" width="${NW}" height="${NH}" rx="3" fill="${col(t.milestone)}"/>` +
+      ['r-st', 'r-user', 'r-opus'].map(r => `<rect class="ring ${r}" x="${x}" y="${yy}" width="${NW}" height="${NH}" rx="3"/>`).join('') +
+      `<text x="${x + NW / 2}" y="${yy + 12.5}" text-anchor="middle">${t.id}</text></g>`;
+  }
+  s += '</svg>';
+  const cv = document.getElementById('canvas'); cv.innerHTML = s;
+  cv.querySelectorAll('.n').forEach(g => g.onclick = () => { sel = +g.dataset.id; draw(); });
+  detail();
+}
+
+function timeBlock(t) {
+  const exp = expect(t), used = t.secs || 0;
+  const row = (l, v, c) => `<span class="l">${l}</span><span class="v"${c ? ` style="color:${c}"` : ''}>${v}</span>`;
+  if (CLOSED.has(t.status)) {
+    if (!t.secs) return `<div class="tb">${row('Took', 'not recorded')}</div>`;
+    const [p, c] = pace(used, exp);
+    return `<div class="tb">${row('Took', approx(used), c)}${row('Expected', approx(exp))}</div><span class="pace" style="--pc:${c}">${p === 'on track' ? 'within expected' : p}</span>`;
+  }
+  const fin = SIM.fin.get(t.id), st = SIM.start.get(t.id);
+  if (t.status === 'running') {
+    const [p, c] = pace(used, exp), pct = Math.min(100, Math.round(100 * used / exp));
+    return `<div class="tb" style="--pc:${c}">${row('Running for', approx(used), c)}${row('Expected total', approx(exp))}${fin ? row('Done in', fromNow(fin)) : ''}<span class="meter"><i style="width:${pct}%"></i></span></div><span class="pace" style="--pc:${c}">${p}</span>`;
+  }
+  return `<div class="tb">${row('Expected total', approx(exp))}${st ? row('Starts in', fromNow(st)) : ''}${fin ? row('Done in', fromNow(fin)) : ''}</div>`;
+}
+
+function decision(t) {
+  // The question and options come from the task's own columns in SQLite.
+  if (t.kind !== 'user' || !t.question) return '';
+  const opts = (t.options || []).map(o => { const k = o.indexOf(':');
+    return `<li>${k > 0 ? `<b>${esc(o.slice(0, k))}</b>${esc(o.slice(k))}` : esc(o)}</li>`; }).join('');
+  return `<div class="dq"><div class="dqq">${esc(t.question)}</div>${t.summary ? `<p class="dqs">${esc(t.summary)}</p>` : ''}` +
+    `${opts ? `<ol class="dqo">${opts}</ol>` : ''}${facts(t.facts, t.id)}</div>`;
+}
+
+// Details: "- " lines from the task's facts column, nested by indent, inside a closed expander.
+// The live refresh redraws the panel, so open expanders are remembered by task id.
+const OPENF = new Set();
+document.addEventListener('toggle', e => { const id = e.target.dataset && e.target.dataset.facts;
+  if (id) e.target.open ? OPENF.add(id) : OPENF.delete(id); }, true);
+function facts(txt, id) {
+  if (!txt) return '';
+  const items = txt.split('\n').filter(l => l.trim()).map(l => {
+    const d = Math.floor((l.length - l.trimStart().length) / 2);
+    return `<li style="margin-left:${d * 14}px">${esc(l.trim().replace(/^- /, ''))}</li>`; }).join('');
+  return `<details class="dqf" data-facts="${id}"${OPENF.has(String(id)) ? ' open' : ''}><summary>Details</summary><ul>${items}</ul></details>`;
+}
+
+function chips(list) {
+  return list.length ? `<div class="ids">${list.sort((a, b) => a - b).map(i => `<button data-go="${i}" title="${esc(T.get(i).title)}">${i}${CLOSED.has(T.get(i).status) ? ' ✓' : ''}</button>`).join('')}</div>` : '<div class="ids">none</div>';
+}
+
+function detail() {
+  const a = document.getElementById('detail');
+  if (!sel || !T.has(sel)) {
+    // Default panel: what is running and blocked right now.
+    const pick = s => D.tasks.filter(t => t.status === s && (view === 'ALL' || t.milestone === view)).sort((x, y) => x.id - y.id);
+    const row = t => {
+      const [p, c] = t.status === 'running' ? pace(t.secs || 0, expect(t)) : ['', ''];
+      return `<button class="job" data-go="${t.id}" style="--pc:${c || 'var(--blk)'}">
+        <span class="jt"><b>${t.id}</b> ${esc(t.title)}</span>
+        <span class="jm">${t.milestone}${t.worker ? ' · worker ' + esc(t.worker) : ''}</span>
+        ${t.status === 'running' ? `<span class="jx"><span>running <b style="color:${c}">${approx(t.secs || 0)}</b></span><span>expected <b>${approx(expect(t))}</b></span><span class="pace" style="--pc:${c};margin:0">${p}</span></span>` : ''}
+      </button>`; };
+    const r = pick('running'), b = pick('blocked');
+    const y = D.tasks.filter(t => !CLOSED.has(t.status) && t.status !== 'superseded' && t.kind === 'user' && (view === 'ALL' || t.milestone === view)).sort((x, z) => x.id - z.id);
+    a.innerHTML = `<h2>Now</h2><div class="k" style="color:var(--run)">Running (${r.length})</div><div class="list">${r.map(row).join('') || 'none'}</div>
+      <div class="k" style="color:var(--blk)">Blocked (${b.length})</div><div class="list">${b.map(row).join('') || 'none'}</div>
+      ${y.length ? `<div class="k" style="color:var(--user)">User (${y.length})</div><div class="list">${y.map(t => row(t) + decision(t)).join('')}</div>` : ''}${decisionLog()}<div class="k">Tip</div><div style="color:var(--muted)">Click a box to trace what it waits on and what it unblocks.</div>`;
+  } else {
+    const t = T.get(sel);
+    a.innerHTML = `<h2>${t.id}. ${esc(t.title)}</h2>
+      <div class="meta">
+        <span class="pill" style="background:${col(t.milestone)}">${t.milestone}</span>
+        <span class="pill st-${CLOSED.has(t.status) ? 'done' : t.status}">${t.status}${t.suffix ? ' · ' + esc(t.suffix) : ''}</span>
+        <span class="pill plain">${t.kind === 'user' ? 'user decision' : 'agent'}</span>
+        ${t.worker ? `<span class="pill plain">worker ${esc(t.worker)}</span>` : ''}
+      </div>
+      ${t.kind === 'user' && t.question ? `<div class="k">Decision</div>${decision(t)}` : ''}
+      <div class="k">Time</div>${timeBlock(t)}
+      <div class="k">Waits on</div>${chips([...deps.get(t.id)])}
+      <div class="k">Unblocks</div>${chips([...kids.get(t.id)])}
+      <div id="sec"></div>`;
+    fillTask(); if (LIVE) loadTask(t.id);
+  }
+  a.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(+b.dataset.go));
+}
+
+// The decision log and the background before it: what the checklist's Context part held.
+function decisionLog() {
+  const log = D.context || []; if (!log.length && !D.intro) return '';
+  const items = log.map(c => `<li><pre class="sx">${esc(c.text.replace(/^- /, ''))}</pre>${c.task ? `<div class="ids"><button data-go="${c.task}">${c.task}</button></div>` : ''}</li>`).join('');
+  return `<div class="k">Decision log (${log.length})</div><details class="dqf log" data-facts="log"${OPENF.has('log') ? ' open' : ''}><summary>Show</summary>` +
+    `${D.intro ? `<pre class="sx">${esc(D.intro)}</pre>` : ''}<ul>${items}</ul></details>`;
+}
+
+// One task's full record (section, Result, record files, steps, decisions), fetched when the task is selected so
+// the polled snapshot stays small. The last record is kept, so a redraw of the same task does not blank the panel.
+let SEC = {id: null, d: null};
+const FIELDS = [['Why', 'why'], ['What', 'what'], ['Details', 'details'], ['Done when', 'done_when'], ['Evidence', 'evidence'], ['Result', 'result']];
+async function loadTask(id) {
+  try {
+    const r = await fetch('task.json?id=' + id, {cache: 'no-store'}); if (!r.ok) return;
+    const d = await r.json(); if (sel !== id) return;
+    SEC = {id, d}; fillTask();
+  } catch (e) {}
+}
+function fillTask() {
+  const el = document.getElementById('sec'); if (!el || SEC.id !== sel || !SEC.d) return;
+  const d = SEC.d, blk = (k, v) => v ? `<div class="k">${k}</div><pre class="sx">${esc(v)}</pre>` : '';
+  // A section that does not split into fields is shown whole; its Result is still its own block.
+  const text = d.body != null ? blk('Section', d.body) + blk('Result', d.result) : FIELDS.map(([l, k]) => blk(l, d[k])).join('');
+  const files = d.files.length ? `<div class="list">${d.files.map(f => `<a href="runs/${encodeURIComponent(f)}" target="_blank" rel="noopener">${esc(d.runs_dir + '/' + f)}</a>`).join('')}</div>` : '<div class="ids">none yet</div>';
+  const steps = d.steps.length ? `<div class="k">Steps</div><div class="steps">${d.steps.map(s =>
+    `<span>${esc(s.step)}${s.verdict && s.verdict !== 'None' ? ' ' + esc(s.verdict) : ''} · ${s.secs == null ? 'running' : fmtDur(s.secs)}${s.rc != null && s.rc !== '0' ? ' · rc ' + esc(s.rc) : ''}${s.tokens != null ? ' · ' + s.tokens + ' tok' : ''}</span>`).join('')}</div>` : '';
+  const log = d.context.length ? `<div class="k">Decisions</div>${d.context.map(c => `<pre class="sx">${esc(c.replace(/^- /, ''))}</pre>`).join('')}` : '';
+  el.innerHTML = (text || '<div class="k">Section</div><div class="ids">none</div>') + `<div class="k">Records</div>${files}${steps}${log}`;
+}
+
+// Flag classes of an open task; the ring CSS and the legend filters both read these.
+const FLT = {running: 'running', blocked: 'blocked', user: 'you', opus: 'opus'};
+function flags(t) {
+  if (CLOSED.has(t.status)) return [];
+  const f = [];
+  if (t.status === 'running' || t.status === 'blocked') f.push(t.status);
+  if (t.kind === 'user') f.push('you');
+  if (t.title.startsWith('[opus]') || t.title.startsWith('[orch]')) f.push('opus');
+  return f;
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c])); }
+async function refresh(first) {
+  const rb = document.querySelector('#reload .ri');
+  rb.classList.remove('spin'); void rb.offsetWidth; rb.classList.add('spin');
+  try {
+    const r = await fetch('data.json', {cache: 'no-store'});
+    if (!r.ok) throw new Error(r.status);
+    LIVE = true; load(await r.json());
+  } catch (e) {
+    if (!first) return;  // keep the last good data if one poll fails
+    load(JSON.parse(document.getElementById('data').textContent));
+  }
+  draw();
+  if (first && LIVE) every();
+}
+// Auto refresh, Grafana style: the viewer picks the period; the choice is kept per browser.
+let TIMER = null;
+const EV = document.getElementById('every');
+try { EV.value = localStorage.getItem('dag_every') || '5'; } catch (e) { EV.value = '5'; }
+function every() {
+  clearInterval(TIMER); const n = +EV.value;
+  if (n && LIVE) TIMER = setInterval(() => refresh(false), n * 1000);
+}
+EV.onchange = () => { try { localStorage.setItem('dag_every', EV.value); } catch (e) {} every(); };
+document.querySelector('#reload .ri').onanimationend = e => e.target.classList.remove('spin');
+document.getElementById('reload').onclick = () => LIVE ? refresh(false) : location.reload();
+refresh(true);
+</script>
+</body>
+</html>

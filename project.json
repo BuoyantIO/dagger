@@ -1,0 +1,7 @@
+{
+  "name": "project",
+  "rules": "CLAUDE.md",
+  "model": "zoltar/coding-deepseek",
+  "caps": {"max_running": 6, "max_opus": 2},
+  "cite_roots": []
+}
