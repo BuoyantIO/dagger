@@ -1,25 +1,23 @@
 # Port check
 
-We ran these checks on this folder in a fresh temp directory, then deleted it. `<tmp>` stands for that directory.
-This file describes the source folder, not an install; the install steps leave it out.
+We ran these checks on this repo in a fresh temp directory, then deleted it. `<tmp>` stands for that directory.
+This file describes the dag repo, not an install.
+
+- Checks 1 to 3 ran on the submodule layout, at commit `3c703bf`: code in `dag/`, project state in `dag_data/`.
+- Checks 4 to 8 ran before that split, at commit `7148845`, and were not rerun.
+  - Their output shows `dag/runs/`, `dag/db/` and `dag/project.json` where the layout now has `dag_data/runs/`, `dag_data/db/` and `dag_data/project.json`.
+  - Check 6, the tests, was rerun inside checks 1 and 2: 9 passed.
 
 ## What ships
 
 ```
-.
 ./.gitignore
 ./CHECKLIST_FORMAT.md
-./db
-./db/.gitkeep
 ./ORCHESTRATOR_PROMPT.md
-./project.json
+./PORT_CHECK.md
 ./README.md
-./runs
-./runs/.gitkeep
-./scripts
 ./scripts/dag_orch.sh
 ./scripts/dag_site.sh
-./src
 ./src/dag_view.html
 ./src/finish.py
 ./src/host.py
@@ -36,75 +34,40 @@ This file describes the source folder, not an install; the install steps leave i
 ./src/tm.py
 ./src/unblock.py
 ./src/watchdog.py
+./template/gitignore
+./template/project.json
 ```
+
+The repo holds no `db/`, `runs/` or `project.json`: a project keeps those in its own `dag_data/`.
 
 ## 1. Install from a local path
 
-We ran the sh blocks of `## Add dag to this project` in README.md as written, in one shell, inside a new git repo that had a `CLAUDE.md`. Only `<source>` was filled in.
+We ran the sh blocks of `## Add dag to this project` in README.md as written, in one shell, inside a new git repo that had a `CLAUDE.md`. Only `<source>` was filled in, with `~/projects/dag`.
 
 ```
---- commands run (the section's sh blocks, with <source> = the local path):
-SOURCE=~/projects/dag
-TARGET=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-if [ -e "$TARGET/dag" ]; then ls -la "$TARGET/dag"; echo "STOP: $TARGET/dag exists"; fi
-case "$SOURCE" in
-  *://* | git@* | *.git) CLONE=$(mktemp -d); git clone --depth 1 "$SOURCE" "$CLONE/dag"; SRC=$CLONE/dag ;;
-  *) CLONE=; SRC=$SOURCE ;;
-esac
-
-rsync -a --exclude '.git' --exclude 'db/tasks.db*' --exclude 'runs/*' --exclude '__pycache__' \
-  --exclude '.pytest_cache' --exclude '.DS_Store' --exclude 'PORT_CHECK.md' "$SRC/" "$TARGET/dag/"
-mkdir -p "$TARGET/dag/db" "$TARGET/dag/runs"
-
-python3 - "$TARGET" <<'EOF'
-import json, os, sys
-p = f'{sys.argv[1]}/dag/project.json'
-c = json.load(open(p)); c['name'] = os.path.basename(sys.argv[1])
-open(p, 'w').write(json.dumps(c, indent=2) + '\n')
-EOF
-
-if [ -f "$TARGET/CLAUDE.md" ]; then cat >> "$TARGET/CLAUDE.md" <<'EOF'
-
-## DAG
-
-- We run this project's tasks as a DAG in `dag/`; read `dag/README.md` before touching it.
-- The live page (`python3 dag/src/tm.py serve`) is the source of truth for people; the data is in `dag/db/tasks.db`.
-- We change tasks only with `python3 dag/src/tm.py`; task records are in `dag/runs/`.
-EOF
-fi
-
-cd "$TARGET"
-python3 -c 'import sys; assert sys.version_info >= (3, 9), sys.version' && command -v pi claude
-python3 dag/src/tm.py init && python3 dag/src/tm.py check
-python3 -m pytest dag/src -q -p no:cacheprovider
-if [ -n "$CLONE" ]; then rm -rf "$CLONE"; fi
-
 --- output:
+Cloning into '<tmp>/projA/dag'...
+done.
 /opt/homebrew/bin/pi
 ~/.local/bin/claude
-created <tmp>/projA/dag/db/tasks.db
+created <tmp>/projA/dag_data/db/tasks.db
 ok
 .........                                                                [100%]
-9 passed in 1.53s
+9 passed in 1.47s
+--- git -C dag status --short (must print nothing):
 --- result:
-dag:
+dag_data:
 .gitignore
-CHECKLIST_FORMAT.md
 db
-ORCHESTRATOR_PROMPT.md
 project.json
-README.md
 runs
-scripts
-src
 
-dag/db:
-.gitkeep
+dag_data/db:
 tasks.db
 tasks.db-shm
 tasks.db-wal
 
-dag/runs:
+dag_data/runs:
 {
   "name": "projA",
   "rules": "CLAUDE.md",
@@ -115,55 +78,69 @@ dag/runs:
   },
   "cite_roots": []
 }
+--- .gitmodules:
+[submodule "dag"]
+	path = dag
+	url = ~/projects/dag
 --- CLAUDE.md tail:
 
 ## DAG
 
-- We run this project's tasks as a DAG in `dag/`; read `dag/README.md` before touching it.
-- The live page (`python3 dag/src/tm.py serve`) is the source of truth for people; the data is in `dag/db/tasks.db`.
-- We change tasks only with `python3 dag/src/tm.py`; task records are in `dag/runs/`.
+- We run this project's tasks as a DAG; the code is the submodule `dag/`, read `dag/README.md` before touching it.
+- The live page (`python3 dag/src/tm.py serve`) is the source of truth for people; the data is in `dag_data/db/tasks.db`.
+- We change tasks only with `python3 dag/src/tm.py`; task records are in `dag_data/runs/`.
+- We never edit files under `dag/` from this project; changes go to the dag repo, then the pin moves.
 --- git check-ignore (must print nothing):
 exit 1
 --- git status --short --ignored:
+A  .gitmodules
+A  dag
 ?? CLAUDE.md
-?? dag/
-!! dag/db/tasks.db-shm
-!! dag/db/tasks.db-wal
+?? dag_data/
+!! dag_data/db/tasks.db-shm
+!! dag_data/db/tasks.db-wal
+--- git submodule status:
+ 3c703bfe048fa0d1ea050595d496a676621fe66d dag (heads/ak-dag-data-split)
+```
+
+- The project writes nothing under `dag/`: the database, the config and the test run all leave the submodule clean.
+- `.gitmodules` holds the absolute local path (shown here with `~`), so this install resolves on one machine only.
+
+A fresh clone of that project gets the code back at the pinned commit, and no database, since none was committed:
+
+```
+--- git clone projA projA_clone; git -c protocol.file.allow=always submodule update --init:
+Submodule path 'dag': checked out '3c703bfe048fa0d1ea050595d496a676621fe66d'
+--- python3 dag/src/tm.py stats: no output, exit 0
 ```
 
 ## 2. Install from a git URL
 
-We pushed a temp copy of this folder to a throwaway local bare repo and used its `file://` URL as `<source>`, inside a new git repo with no `CLAUDE.md`. Nothing was pushed to a remote, and this folder got no `.git`.
+We made a throwaway bare clone of this repo and used its `file://` URL as `<source>`, inside a new git repo with no `CLAUDE.md`. Nothing was pushed to a remote.
 
 ```
 --- output:
-Cloning into '<tmpdir>/tmp.XSB3FHyXgZ/dag'...
-/opt/homebrew/bin/pi
-~/.local/bin/claude
-created <tmp>/projB/dag/db/tasks.db
+Cloning into '<tmp>/projB/dag'...
+created <tmp>/projB/dag_data/db/tasks.db
 ok
-.........                                                                [100%]
-9 passed in 1.60s
---- result:
-.gitignore
-CHECKLIST_FORMAT.md
-db
-ORCHESTRATOR_PROMPT.md
-project.json
-README.md
-runs
-scripts
-src
-git dirs under dag: 0
-CLAUDE.md created: no
-  "name": "projB",
-leftover clones: 0
+9 passed in 1.47s
+--- git -C dag status --short (must print nothing):
+--- git submodule status:
+ 3c703bfe048fa0d1ea050595d496a676621fe66d dag (heads/ak-dag-data-split)
+--- CLAUDE.md: not created
 ```
+
+A `file://` URL needs `-c protocol.file.allow=always` like a local path; an `https` or `ssh` URL was not run.
 
 ## 3. A second run stops
 
+Step 1 of the install, run again in `projA`, and run in a directory that is no git repo:
+
 ```
 STOP: <tmp>/projA/dag exists
+STOP: <tmp>/projA/dag_data exists
+fatal: not a git repository (or any of the parent directories): .git
+STOP: not a git repo
 ```
 
 ## 4. Intake of the documented example, export, and the page on port 8767
