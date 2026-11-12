@@ -849,18 +849,22 @@ def ancestors(c, n):
 SPLIT_REF = r'(?:(?P<label>\btasks?)(?P<sep>[ _]))?(?<!\d){}(?!\d)'
 
 
-def repoint_text(text, old, new):
-    """One text field with every mention of task `old` replaced by `new`, keeping the `task ` or `task_` form used."""
+def repoint_text(text, old, new, bare=True):
+    """One text field with every mention of task `old` replaced by `new`, keeping the `task ` or `task_` form used.
+
+    `bare=False` leaves a bare `old` alone: a part's own text is full of line counts and estimates, and only the
+    labelled forms are references (the ones lint fails)."""
     if not text:
         return text
     return re.sub(SPLIT_REF.format(old),
-                  lambda m: f'{m.group("label")}{m.group("sep")}{new}' if m.group('label') else str(new), text)
+                  lambda m: f'{m.group("label")}{m.group("sep")}{new}' if m.group('label')
+                  else str(new) if bare else m.group(0), text)
 
 
 def cmd_split(a):
     """Replace task `id` by chunk tasks and a merge task: chunks inherit its dependencies, the merge waits on every
-    chunk, every open task that waited on `id` waits on the merge instead and names it in its own text, and `id`
-    becomes superseded."""
+    chunk, every open task that waited on `id` waits on the merge instead and names it in its own text, the chunks and the
+    merge name the merge where they named `id`, and `id` becomes superseded."""
     c = connect(); c.execute('BEGIN IMMEDIATE'); get(c, a.id)
     chunks = parse_ids(a.into)
     for i in chunks + [a.merge]: get(c, i)
@@ -880,6 +884,17 @@ def cmd_split(a):
         new = [repoint_text(v, a.id, a.merge) for v in row]
         if new != list(row):
             c.execute('UPDATE tasks SET what=?, details=?, done_when=?, updated=? WHERE id=?', (*new, time.time(), t))
+    # Parts and merge name the merge too. The assess step writes them before the split, so their paths carry the
+    # split id (`task_8_part2_x.md`); lint then fails each part for naming a superseded task and no worker claims
+    # it. One rewrite across all of them keeps a part file's name equal where it is written and where it is read.
+    # The exec file is the exception: each part names its own. Pointed at the merge's, every part would log into
+    # one file that the scheduler renames to `_prev1` when the merge starts, leaving the parts' records dangling.
+    for i in chunks + [a.merge]:
+        row = c.execute('SELECT what, details, done_when FROM tasks WHERE id=?', (i,)).fetchone()
+        new = [repoint_text(re.sub(rf'\btask_{a.id}_exec(?![0-9])', f'task_{i}_exec', v or '') or v, a.id, a.merge, bare=False)
+               for v in row]
+        if new != list(row):
+            c.execute('UPDATE tasks SET what=?, details=?, done_when=?, updated=? WHERE id=?', (*new, time.time(), i))
     # A task that a chunk now waits on (inherited from the split task) must not also wait on that chunk.
     for i in chunks + [a.merge]:
         up = ancestors(c, i)
