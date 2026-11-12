@@ -32,14 +32,14 @@ esac
 cd "$(dirname "$0")/../.."
 root=$PWD
 
-# A fresh copy of dag/ may lack the runtime dir that holds logs and task records.
-mkdir -p dag/runs
+# The data folder of a fresh project may lack the runtime dir that holds logs and task records.
+mkdir -p dag_data/runs
 
 # Start unblock unless one runs for this root; the absolute path keeps other projects' daemons out of the match.
 if pgrep -f "$root/dag/src/unblock.py" >/dev/null; then
   echo "[-] unblock already running"
 else
-  nohup python3 "$root/dag/src/unblock.py" >>dag/runs/unblock.out 2>&1 &
+  nohup python3 "$root/dag/src/unblock.py" >>dag_data/runs/unblock.out 2>&1 &
   echo "[-] unblock started"
 fi
 
@@ -47,7 +47,7 @@ fi
 if pgrep -f "$root/dag/src/tm.py serve" >/dev/null; then
   echo "[-] page already running"
 else
-  nohup python3 "$root/dag/src/tm.py" serve --port "$PORT" >>dag/runs/serve.out 2>&1 &
+  nohup python3 "$root/dag/src/tm.py" serve --port "$PORT" >>dag_data/runs/serve.out 2>&1 &
   echo "[-] page started"
 fi
 echo "[-] page: http://localhost:$PORT"

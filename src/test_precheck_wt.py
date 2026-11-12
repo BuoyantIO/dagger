@@ -46,20 +46,20 @@ def test_cite_roots_follow_the_environment(monkeypatch, tmp_path):
 def test_precheck_reports_each_finding(tmp_path):
     """One exec file with four defects yields four findings and exit 1; the corrected file yields none and exit 0.
 
-    Sets up a scratch project (a copy of `host.py` and `precheck.py` under `<tmp>/dag/src`, a `runs` table, the
-    runs dir, one repo file of two lines) and runs `precheck.py` as the scheduler does. Catches a check that
-    never fires: a missing self-check section, a list line over 200 characters, a citation past the end of its
+    Sets up a scratch project (a copy of `host.py` and `precheck.py` under `<tmp>/dag/src`, a `runs` table in
+    `<tmp>/dag_data`, the runs dir, one repo file of two lines) and runs `precheck.py` as the scheduler does.
+    Catches a check that never fires: a missing self-check section, a list line over 200 characters, a citation past the end of its
     file, and a citation on a blank line.
     """
     # Scratch project: the root is two levels above the copied src/, so nothing here touches the real one.
-    dag = tmp_path / 'dag' / 'src'; dag.mkdir(parents=True); (tmp_path / 'dag' / 'db').mkdir()
+    dag = tmp_path / 'dag' / 'src'; dag.mkdir(parents=True); (tmp_path / 'dag_data' / 'db').mkdir(parents=True)
     for name in ('host.py', 'precheck.py'):
         shutil.copy(f'{HERE}/{name}', dag / name)
-    ar = tmp_path / 'dag' / 'runs'; ar.mkdir()
+    ar = tmp_path / 'dag_data' / 'runs'; ar.mkdir()
     tree = tmp_path / 'wt_demo_repo'; tree.mkdir()
     (tree / 'README.md').write_text('# Readme\n\n')
     # The db needs only the `runs` table `started` reads.
-    c = sqlite3.connect(str(tmp_path / 'dag' / 'db' / 'tasks.db'))
+    c = sqlite3.connect(str(tmp_path / 'dag_data' / 'db' / 'tasks.db'))
     c.execute('CREATE TABLE runs (task INTEGER, step TEXT, started REAL)'); c.commit(); c.close()
     env = {k: v for k, v in os.environ.items() if not k.startswith('DAG_')}
     env['DAG_CITE_ROOTS'] = str(tree)

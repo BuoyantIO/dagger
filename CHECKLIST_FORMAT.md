@@ -102,7 +102,7 @@ The block between the markers imports cleanly; `src/test_import.py` checks it.
 We want a one-page view of where the code is, before deciding what to split.
 
 - Decision: count lines, not bytes (user choice; rejected: bytes).
-- Every result file goes in `dag/runs/`; the report goes in the root.
+- Every result file goes in `dag_data/runs/`; the report goes in the root.
 
 ## 1. Count the lines
 
@@ -110,7 +110,7 @@ Why:
 The report needs one number per file.
 
 What:
-`dag/runs/task_1_result.md`: one `<lines> <path>` line per `.py` file under `src/`.
+`dag_data/runs/task_1_result.md`: one `<lines> <path>` line per `.py` file under `src/`.
 
 Details:
 - Run `wc -l src/*.py` and copy its lines, without the total.
@@ -128,15 +128,15 @@ Why:
 The report leads with the files most worth splitting.
 
 What:
-`dag/runs/task_2_result.md`: the three paths with the most lines, largest first.
+`dag_data/runs/task_2_result.md`: the three paths with the most lines, largest first.
 
 Details:
-- Input: `dag/runs/task_1_result.md`.
+- Input: `dag_data/runs/task_1_result.md`.
 - Time budget: estimate 5 min.
 Depends: 1.
 
 Done when:
-`sort -rn dag/runs/task_1_result.md | head -3` names the same three paths in the same order.
+`sort -rn dag_data/runs/task_1_result.md | head -3` names the same three paths in the same order.
 
 Evidence:
 The sort output.
@@ -150,7 +150,7 @@ What:
 `size_report.md` in the root: the total, the table of files, and the three largest with one sentence each.
 
 Details:
-- Inputs: `dag/runs/task_1_result.md` and `dag/runs/task_2_result.md`.
+- Inputs: `dag_data/runs/task_1_result.md` and `dag_data/runs/task_2_result.md`.
 - Time budget: estimate 10 min.
 Depends: 1, 2.
 

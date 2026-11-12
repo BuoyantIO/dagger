@@ -1,8 +1,10 @@
 """Host facts for the DAG scripts: paths derived from this file's location, project facts from `project.json`.
 
-The DAG folder is the parent of this `src/` directory and the project root is its parent, so the folder runs
-unchanged wherever it is copied and no user's home is written here. Everything a project changes lives in
-`project.json` at the top of the DAG folder; with no file, the defaults below apply. We read JSON because Python 3.9 has no `tomllib`.
+The code folder is the parent of this `src/` directory, a checkout of the dag repo that a project mounts as the
+git submodule `dag/`. The project root is its parent, and everything the project owns lives beside the code in
+`dag_data/` at the root: the config, the database and the run records. The code folder holds no project state,
+so every project runs the same commit of it unchanged and no user's home is written here. With no `project.json`,
+the defaults below apply. We read JSON because Python 3.9 has no `tomllib`.
 
 `project.json` keys, all optional:
 - `name`: the project name; the page title uses it. Default: `Task DAG`.
@@ -12,8 +14,9 @@ unchanged wherever it is copied and no user's home is written here. Everything a
 - `cite_roots`: directory globs (`~` allowed) a cited `path:line` may resolve under, beside the root. Default: none.
 
 Env overrides, for tests and scratch runs:
-- `DAG_DB`: the task database. Default: `db/tasks.db` in the DAG folder.
-- `DAG_RUNS`: task records and runtime state (exec and review files, logs, STOP, COMMIT). Default: `runs/` in the DAG folder.
+- `DAG_DATA`: the project's data folder. Default: `dag_data/` at the project root.
+- `DAG_DB`: the task database. Default: `db/tasks.db` in the data folder.
+- `DAG_RUNS`: task records and runtime state (exec and review files, logs, STOP, COMMIT). Default: `runs/` in the data folder.
 - `DAG_CITE_ROOTS`: comma-separated directories that replace the config's `cite_roots`.
 - `DAG_PI`: the `pi` binary the scheduler runs. Default: `pi` on `PATH`.
 """
@@ -22,6 +25,9 @@ import glob, json, os, sqlite3
 HERE = os.path.dirname(os.path.abspath(__file__))
 DAG = os.path.dirname(HERE)
 ROOT = os.path.dirname(DAG)
+# Project state lives outside the code folder: a submodule's tree belongs to the dag repo, so the project could
+# not commit its config, database or records from inside it.
+DATA = os.path.abspath(os.environ.get('DAG_DATA') or f'{ROOT}/dag_data')
 
 DEFAULTS = {'name': 'Task DAG', 'rules': 'CLAUDE.md',
             'model': 'zoltar/coding-deepseek', 'caps': {'max_running': 6, 'max_opus': 2}, 'cite_roots': []}
@@ -31,7 +37,7 @@ def load_config():
     """The defaults overlaid with `project.json`; a missing file is an unconfigured project, not an error."""
     cfg = dict(DEFAULTS)
     try:
-        with open(f'{DAG}/project.json') as f:
+        with open(f'{DATA}/project.json') as f:
             user = json.load(f)
     except FileNotFoundError:
         user = {}
@@ -46,9 +52,9 @@ RULES = CFG['rules']
 MODEL = CFG['model']
 CAPS = CFG['caps']
 
-DB = os.path.abspath(os.environ.get('DAG_DB') or f'{DAG}/db/tasks.db')
+DB = os.path.abspath(os.environ.get('DAG_DB') or f'{DATA}/db/tasks.db')
 # One directory for what a task leaves behind and what the daemons need while they run: records beside state.
-RUNS = os.environ.get('DAG_RUNS') or f'{DAG}/runs'
+RUNS = os.environ.get('DAG_RUNS') or f'{DATA}/runs'
 PI = os.environ.get('DAG_PI') or 'pi'
 
 

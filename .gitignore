@@ -1,16 +1,3 @@
-# The database's side files; tasks.db itself is committable.
-db/tasks.db-wal
-db/tasks.db-shm
-# Runtime state in runs/; the task records (task_<n>_*.md and raw outputs) stay committable.
-runs/*.log
-runs/*.out
-runs/*.err
-runs/*.jsonl
-runs/*.tmp
-runs/STOP
-runs/COMMIT
-runs/watchdog_seen.json
-runs/task_*_commit.txt
-runs/tasks_*.db
 __pycache__/
 .pytest_cache/
+.DS_Store
