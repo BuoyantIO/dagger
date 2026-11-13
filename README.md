@@ -145,6 +145,7 @@ In `src/`, all code:
 - `tm.py`: the only way to read or change `tasks.db` (tasks, deps, caps, claims, locks, the page); a CLI everything calls.
 - `sched.py`: workers that claim ready tasks and run each through pi; one daemon per handover.
 - `unblock.py`: a daemon that gives each blocked task up to 2 retries, then escalates.
+- `autocap.py`: an optional daemon that sets `max_running` every 15 s from the GPU backend's load (below, "Caps").
 - `watchdog.py`: one-shot; exits with a report on a new anomaly or after 5 min, which wakes the orchestrator.
 - `finish.py <n> [--fix]`: fix, review and close one task outside the scheduler.
 - `precheck.py <n>`: deterministic checks between exec and review; the scheduler calls it.
@@ -215,6 +216,13 @@ table and `runs/status.log`; `tasks.updated` is overwritten.
 - `max_running` (`tm.py cap <n>`): all running tasks; it gates new claims only, and `tm.py cap 0` restores the config default.
 - `max_opus` (`tm.py cap --opus <n>`): `[opus]` tasks the orchestrator runs at once; the orchestrator reads it.
 - `dag_data/project.json` `caps` sets both defaults (6 and 2 with no file); `tm.py cap` and `tm.py cap --opus` print the live values.
+- `autocap.py` moves `max_running` on its own when the tasks share a GPU backend with vLLM metrics; without it the cap is static.
+  - Ceiling: 36 agents, 90 % of the 40 at which the measured GPU degrades (`tip_agents` in `project.json` `autocap`).
+  - Under the ceiling it holds requests in flight at 90 % of the knee (34, where output peaks) and the KV cache under 0.675.
+  - Requests waiting, a slow first token, preemptions or prefix-index churn cut the cap to 75 % of running.
+  - It never raises the knee itself: we do not cross the limit to find it. Raise `autocap_knee` in `meta` by hand after a capacity change.
+  - The cap is per project: two projects on one GPU must split the ceiling by hand with `DAG_AUTOCAP_HI` until they coordinate.
+  - Start: `nohup python3 $D/src/autocap.py >> $R/autocap.out 2>&1 &`; it logs each poll to `runs/autocap.log`.
 
 ## Starting everything by hand (from the project root)
 

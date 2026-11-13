@@ -19,8 +19,10 @@ Env overrides, for tests and scratch runs:
 - `DAG_RUNS`: task records and runtime state (exec and review files, logs, STOP, COMMIT). Default: `runs/` in the data folder.
 - `DAG_CITE_ROOTS`: comma-separated directories that replace the config's `cite_roots`.
 - `DAG_PI`: the `pi` binary the scheduler runs. Default: `pi` on `PATH`.
+- `DAG_GRAFANA_TOKEN_FILE`: a mode-600 file with the Grafana token `autocap.py` reads. Default: the macOS keychain item `zoltar-grafana`.
+- `DAG_AUTOCAP_HI`: a lower ceiling for `autocap.py`, for a project that takes only part of a shared GPU. Default: 90 % of `tip_agents`.
 """
-import glob, json, os, sqlite3
+import glob, json, os, sqlite3, subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DAG = os.path.dirname(HERE)
@@ -89,3 +91,16 @@ def connect_ro(timeout=60):
         return c
     except sqlite3.OperationalError:
         return sqlite3.connect(DB, timeout=timeout)
+
+
+def grafana_token():
+    """The Grafana bearer token for `autocap.py`, read fresh on each call and never cached or written anywhere.
+
+    `DAG_GRAFANA_TOKEN_FILE` names a mode-600 file holding it; unset, it is the macOS keychain item `zoltar-grafana`.
+    """
+    path = os.environ.get('DAG_GRAFANA_TOKEN_FILE')
+    if path:
+        with open(os.path.expanduser(path)) as f:
+            return f.read().strip()
+    return subprocess.run(['security', 'find-generic-password', '-a', os.environ.get('USER', ''), '-s', 'zoltar-grafana', '-w'],
+                          capture_output=True, text=True, check=True).stdout.strip()
