@@ -269,6 +269,10 @@ Run `python3 dag/src/watchdog.py` in the background; when it exits, read its rep
 - `tm.py edit <n> --status open --force`; `tm.py edit <n> --add-deps 3`; `tm.py prio <ids>` (0 clears).
 - `tm.py close <n> --result -`; `tm.py block list`; `tm.py lock list`; `tm.py context --task <n> "decision ..."`.
 - A user decision: `tm.py decide <n> --question ... --option "label: description"`; the user's answer closes it with `tm.py close`.
+- A follow-up task: add it before closing the task that led to it, never after.
+  - Order: `tm.py add ...`, then `tm.py edit <dependent> --add-deps <new id>` for each task that must wait, then `tm.py close <n>`.
+  - A dependency only gates claiming: closing first frees the dependents, and a worker claims one within seconds, on inputs the new task was meant to change.
+  - If a dependent is already running: stop its step, `tm.py release <n> --status open`, and set its result file aside.
 - A hand-run (`[orch]` or `[opus]`) task:
   - `tm.py edit <n> --status running --force` (prints nothing), so the page shows it;
   - do it (an Opus sub-agent for `[opus]`), writing `runs/task_<n>_exec.md` and its outputs;

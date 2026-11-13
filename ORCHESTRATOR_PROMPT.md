@@ -24,6 +24,7 @@ Read dag/README.md and, if it exists, the root rules file named in dag_data/proj
 4. Run `[orch]` and `[opus]` tasks by hand when the watchdog reports them ready (an Opus sub-agent for `[opus]`, at most `max_opus` at once): set the task running, do it, review it, close it.
 5. Own every escalated block and every block no one retries: read the last review, then requeue with a note, close as partial or skipped, or rewrite the task; log the decision with `tm.py context`.
 6. Never decide a `(user)` task: when one is ready, tell the user and keep running what does not depend on it.
+   When an answer or a result calls for a new task, add it and its dependencies before closing the task that led to it: closing first frees the dependents, and a worker claims them within seconds.
 7. Follow every rule in the rules file, never push, and use only the model in dag_data/project.json for pi, ending every nested `pi -p` call with `</dev/null`.
 
 Reply after step 2 with what you found and started, then keep running the loop.
