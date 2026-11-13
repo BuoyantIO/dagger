@@ -93,6 +93,15 @@ def check(seen):
                                            AND u.status NOT IN ('done','superseded','skipped','obsolete'))"""):
         if f'user:{tid}' not in seen:
             out.append(('user', tid, f'{tid} waits on the user: {title[:80]}'))
+    # A held task is claimed by no one: report it once its dependencies are closed, so a hold left behind after
+    # `close --hold` cannot stall the DAG unseen.
+    hold = [x for (v,) in q("SELECT value FROM meta WHERE key='hold'") for x in v.split(',') if x]
+    for tid in hold:
+        open_deps = q("""SELECT count(*) FROM deps d JOIN tasks u ON u.id=d.dep WHERE d.task=?
+                         AND u.status NOT IN ('done','superseded','skipped','obsolete')""", int(tid))[0][0]
+        st = q('SELECT status FROM tasks WHERE id=?', int(tid))
+        if st and st[0][0] == 'open' and not open_deps and f'held:{tid}' not in seen:
+            out.append(('held', tid, f'{tid} is held and otherwise ready: add its dependency or `tm.py hold --clear {tid}`'))
     for (tid,) in q("SELECT DISTINCT task FROM blocks WHERE outcome='escalated'"):
         if f'escalated:{tid}' not in seen:
             out.append(('escalated', tid, f'{tid} escalated after two unblock attempts'))

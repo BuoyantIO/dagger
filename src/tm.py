@@ -409,13 +409,26 @@ def get(c, n):
     return t
 
 
+def held(c):
+    """Task ids on hold: open tasks no one may claim until a follow-up task is wired in ahead of them."""
+    r = c.execute("SELECT value FROM meta WHERE key='hold'").fetchone()
+    return [int(x) for x in r[0].split(',') if x] if r and r[0] else []
+
+
+def set_held(c, ids):
+    c.execute("INSERT OR REPLACE INTO meta VALUES ('hold', ?)", (','.join(str(i) for i in sorted(set(ids))),))
+
+
 def ready_rows(c, user=False):
     q = f"""SELECT t.* FROM tasks t JOIN milestones m ON m.id=t.milestone
             WHERE t.status='open' {'' if user else "AND t.kind='agent'"}
             AND NOT EXISTS (SELECT 1 FROM deps d JOIN tasks u ON u.id=d.dep
                             WHERE d.task=t.id AND u.status NOT IN {CLOSED})
             ORDER BY m.ord, t.ord"""
-    rows = c.execute(q).fetchall()
+    # A held task is not ready: `close --hold` parks the dependents of the task it closes, so no worker claims
+    # one in the seconds before the follow-up task and its dependency exist.
+    hold = held(c)
+    rows = [r for r in c.execute(q).fetchall() if r['id'] not in hold]
     # Within a milestone, start the task that unblocks the most work: rank by every open task downstream of it
     # (transitive), not only direct dependents, so the head of a long chain is not left behind a leaf.
     kids = {}
@@ -926,6 +939,9 @@ def cmd_edit(a):
         c.execute(f"UPDATE tasks SET {','.join(k + '=?' for k in sets)} WHERE id=?", [*sets.values(), a.id])
     if a.deps is not None: set_deps(c, a.id, parse_ids(a.deps))
     for d in parse_ids(a.add_deps): get(c, d); c.execute('INSERT OR IGNORE INTO deps VALUES (?,?)', (a.id, d))
+    # A hold exists to buy time for this edit: once the new dependency gates the task, the hold has no job left,
+    # and clearing it here means a forgotten `hold --clear` cannot strand the task.
+    if parse_ids(a.add_deps) and a.id in held(c): set_held(c, [i for i in held(c) if i != a.id])
     for d in parse_ids(a.rm_deps): c.execute('DELETE FROM deps WHERE task=? AND dep=?', (a.id, d))
     c.execute('COMMIT'); checkpoint(c)
 
@@ -934,6 +950,12 @@ def cmd_close(a):
     c = connect(); c.execute('BEGIN IMMEDIATE'); get(c, a.id)
     st = a.status or 'done'
     if st not in CLOSED: sys.exit(f'close status must be one of {CLOSED}')
+    # Hold in the same transaction as the close: a dependent freed by this close is claimed within seconds, so a
+    # hold placed by a second command would lose the race it exists to win.
+    if a.hold:
+        ids = parse_ids(a.hold)
+        for i in ids: get(c, i)
+        set_held(c, held(c) + ids)
     c.execute('UPDATE tasks SET status=?, suffix=?, worker=NULL, updated=? WHERE id=?',
               (st, a.reason or '', time.time(), a.id))
     if a.result:
@@ -1007,6 +1029,16 @@ def cmd_release(a):
     c.execute("UPDATE tasks SET status=?, worker=NULL, updated=? WHERE id=? AND status='running'",
               (a.status, time.time(), a.id))
     checkpoint(c)
+
+
+def cmd_hold(a):
+    """Show the held task ids, hold more, or clear some (`--clear all` clears every hold)."""
+    c = connect(); c.execute('BEGIN IMMEDIATE'); cur = held(c)
+    if a.clear:
+        cur = [] if a.clear == 'all' else [i for i in cur if i not in parse_ids(a.clear)]
+    for i in parse_ids(','.join(a.ids)): get(c, i); cur.append(i)
+    if a.clear or a.ids: set_held(c, cur)
+    c.execute('COMMIT'); print(','.join(str(i) for i in sorted(set(cur))) or 'none')
 
 
 def cmd_prio(a):
@@ -1182,12 +1214,16 @@ def main():
     x.add_argument('--force', action='store_true')
     x.add_argument('--assessed', choices=['yes', 'no']); x.set_defaults(f=cmd_edit)
     x = s.add_parser('close', help='close a task'); x.add_argument('id', type=int); x.add_argument('--status', choices=CLOSED)
-    x.add_argument('--reason'); x.add_argument('--result', help='Result block text, @file or -'); x.set_defaults(f=cmd_close)
+    x.add_argument('--reason'); x.add_argument('--result', help='Result block text, @file or -')
+    x.add_argument('--hold', help='task ids to hold in the same step, so no worker claims them before a follow-up task gates them')
+    x.set_defaults(f=cmd_close)
     x = s.add_parser('ms', help='milestones: add, edit, list'); x.add_argument('op', choices=['add', 'edit', 'list']); x.add_argument('id', nargs='?')
     x.add_argument('--title'); x.add_argument('--note'); x.add_argument('--after'); x.set_defaults(f=cmd_ms)
     x = s.add_parser('context', help='append a decision-log entry'); x.add_argument('text'); x.add_argument('--task', type=int); x.set_defaults(f=cmd_context)
     x = s.add_parser('claim', help='claim the next ready task'); x.add_argument('--worker', required=True); x.add_argument('--ms'); x.set_defaults(f=cmd_claim)
     x = s.add_parser('release'); x.add_argument('id', type=int); x.add_argument('--status', default='open', choices=['open', 'blocked']); x.set_defaults(f=cmd_release)
+    x = s.add_parser('hold', help='task ids no worker may claim; `edit --add-deps` or `--clear` lifts a hold'); x.add_argument('ids', nargs='*')
+    x.add_argument('--clear', help='ids to release, or `all`'); x.set_defaults(f=cmd_hold)
     x = s.add_parser('prio', help='priority task ids claim hands out first (0 clears)'); x.add_argument('ids', nargs='*'); x.set_defaults(f=cmd_prio)
     x = s.add_parser('cap', help='live cap on running tasks (0 restores the default); --opus sets the Opus cap'); x.add_argument('n', type=int, nargs='?')
     x.add_argument('--opus', action='store_true', help='Opus tasks the orchestrator runs at once'); x.set_defaults(f=cmd_cap)
